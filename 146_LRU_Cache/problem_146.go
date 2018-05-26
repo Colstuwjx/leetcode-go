@@ -29,71 +29,123 @@ package main
 */
 
 /*
-   解题思路：
+   解题思路:
 
    因为有O(1)的算法复杂度要求，所以需要用到hashmap
    每次添加数据时，用一个双向链表来存储对应的value，同时用链表建立前后更新关系，用hashmap存储key和对应链表数组item的索引；
    每次获取数据时，根据hashmap获取到的item索引取出链表数组里的实际value；
    每次容量填满需要踢出数据时（即hashmap key not exist时），去掉最久没更新的一个item数据（即链表的头），并在尾部插入一条新数据；
+
+   改进:
+
+   大体思路仍然不变，改进点在于实现LRUCache的removeOldest方法来专门管理旧节点的过期，允许头尾相连，减少边际条件的判断
+   之前的解法：[Ugly but works solution](https://github.com/Colstuwjx/leetcode-go/blob/c977440992103edf75eabd05ac89f7e1d98eff2e/146_LRU_Cache/problem_146.go)
 */
 
 import "log"
 
-const (
-	NotExistIndex = -1
-)
-
-type LinkedListItem struct {
-	index int
+type LinkedListNode struct {
 	key   int
 	value int
-	prior *LinkedListItem
-	next  *LinkedListItem
+	prev  *LinkedListNode
+	next  *LinkedListNode
+}
+
+func NewNode(key, value int) *LinkedListNode {
+	return &LinkedListNode{
+		key:   key,
+		value: value,
+		prev:  nil,
+		next:  nil,
+	}
 }
 
 type DoublyLinkedList struct {
-	head   *LinkedListItem
-	tail   *LinkedListItem
-	values []*LinkedListItem
+	head *LinkedListNode
+	tail *LinkedListNode
+}
+
+func (this *DoublyLinkedList) Insert(node *LinkedListNode) *DoublyLinkedList {
+	if this.head == nil {
+		this.head, this.tail = node, node
+		node.prev, node.next = nil, nil
+		return this
+	}
+
+	this.tail.next = node
+	node.prev = this.tail
+	this.tail = node
+	return this
+}
+
+func (this *DoublyLinkedList) RemoveHead() *DoublyLinkedList {
+	this.Remove(this.head)
+	return this
+}
+
+func (this *DoublyLinkedList) Remove(node *LinkedListNode) *DoublyLinkedList {
+	if this.head == this.tail {
+		this.head = nil
+		this.tail = nil
+		return this
+	}
+
+	if node == this.head {
+		node.next.prev = nil
+		this.head = node.next
+		return this
+	}
+
+	if node == this.tail {
+		node.prev.next = nil
+		this.tail = node.prev
+		return this
+	}
+
+	node.prev.next = node.next
+	node.next.prev = node.prev
+	return this
 }
 
 type LRUCache struct {
 	doublyLinkedList *DoublyLinkedList
-	valueMap         map[int]int
-	capacity         int
+	valueMap         map[int]*LinkedListNode
+	capacity, length int
 }
 
 func Constructor(capacity int) LRUCache {
-	var valueSlices []*LinkedListItem
-
 	if capacity <= 0 {
 		panic("capacity must be positive number!")
 	}
 
 	return LRUCache{
 		doublyLinkedList: &DoublyLinkedList{
-			head:   nil,
-			tail:   nil,
-			values: valueSlices,
+			head: nil,
+			tail: nil,
 		},
-		valueMap: map[int]int{},
+		valueMap: map[int]*LinkedListNode{},
 		capacity: capacity,
+		length:   0,
 	}
 }
 
 func (this *LRUCache) Get(key int) int {
-	idx, exist := this.valueMap[key]
-	if !exist || idx == -1 {
+	node, exist := this.valueMap[key]
+	if !exist {
 		return -1
 	}
 
-	value := this.doublyLinkedList.values[idx].value
-	this.evictKeyWithAppendTail(idx, key, value)
-	return value
+	this.doublyLinkedList.Remove(node)
+	this.doublyLinkedList.Insert(node)
+	return node.value
 }
 
 func (this *LRUCache) IndexMap() map[int]int {
-	return this.valueMap
+	values := make(map[int]int)
+	for key, node := range this.valueMap {
+		values[key] = node.value
+	}
+	return values
 }
 
 func (this *LRUCache) Iteral() [][]int {
@@ -111,134 +163,41 @@ func (this *LRUCache) Iteral() [][]int {
 	return values
 }
 
-func (this *LRUCache) evictKeyWithAppendTail(index, key, value int) *LRUCache {
-	item := &LinkedListItem{
-		index: index,
-		key:   key,
-		value: value,
-		prior: nil,
-		next:  nil,
-	}
-
-	// 1. head is nil or cap = 1
-	if this.doublyLinkedList.head == nil || this.capacity == 1 {
-		currentHead := this.doublyLinkedList.head
-		if currentHead != nil && currentHead.key != item.key {
-			this.valueMap[currentHead.key] = NotExistIndex
-		}
-
-		item.index = 0
-		this.doublyLinkedList.head = item
-		this.doublyLinkedList.tail = nil
-		if len(this.doublyLinkedList.values) != 0 {
-			this.doublyLinkedList.values[0] = item
-		} else {
-			this.doublyLinkedList.values = append(this.doublyLinkedList.values, item)
-		}
-
-		this.valueMap[key] = item.index
-		return this
-	}
-
-	// 2. head is not nil, and need to evict head
-	if this.doublyLinkedList.head.index == index {
-		// ONLY one item case
-		if this.doublyLinkedList.head.next == nil {
-			this.doublyLinkedList.head = item
-			this.doublyLinkedList.tail = nil
-
-			evictItemKey := this.doublyLinkedList.values[index].key
-			this.valueMap[evictItemKey] = NotExistIndex
-			this.doublyLinkedList.values[index] = item
-			this.valueMap[key] = index
-			return this
-		}
-
-		currentHead := this.doublyLinkedList.head
-		this.doublyLinkedList.head.next.prior = nil
-		this.doublyLinkedList.head = currentHead.next
-		this.doublyLinkedList.tail.next = item
-		item.prior = this.doublyLinkedList.tail
-		this.doublyLinkedList.tail = item
-
-		evictHeadKey := this.doublyLinkedList.values[index].key
-		this.valueMap[evictHeadKey] = NotExistIndex
-		this.doublyLinkedList.values[index] = item
-		this.valueMap[key] = item.index
-		return this
-	}
-
-	// 3. tail is nil and need to init
-	if this.doublyLinkedList.tail == nil {
-		this.doublyLinkedList.head.next = item
-		this.doublyLinkedList.tail = item
-		this.doublyLinkedList.tail.prior = this.doublyLinkedList.head
-		this.doublyLinkedList.values = append(this.doublyLinkedList.values, item)
-		this.valueMap[key] = index
-		return this
-	}
-
-	// 4. evict other node(include tail), or append item
-	if len(this.doublyLinkedList.values) > index {
-		evictItem := this.doublyLinkedList.values[index]
-		if evictItem.prior.next != nil {
-			evictItem.prior.next = evictItem.next
-		} else {
-			this.doublyLinkedList.head.next = item
-		}
-
-		if evictItem.next != nil {
-			evictItem.next.prior = evictItem.prior
-		} else {
-			this.doublyLinkedList.tail = evictItem.prior
-		}
-		this.valueMap[evictItem.key] = NotExistIndex
-	}
-
-	item.prior = this.doublyLinkedList.tail
-	this.doublyLinkedList.tail.next = item
-	this.doublyLinkedList.tail = item
-	if len(this.doublyLinkedList.values) == index {
-		this.doublyLinkedList.values = append(this.doublyLinkedList.values, item)
-	} else {
-		this.doublyLinkedList.values[index] = item
-	}
-
-	this.valueMap[key] = item.index
-	return this
-}
-
 func (this *LRUCache) Put(key int, value int) {
-	idx, exist := this.valueMap[key]
-	if !exist || idx == NotExistIndex {
-		if len(this.doublyLinkedList.values) >= this.capacity {
-			evictHeadIndex := this.doublyLinkedList.head.index
-			this.evictKeyWithAppendTail(evictHeadIndex, key, value)
-		} else {
-			appendToTailIndex := len(this.doublyLinkedList.values)
-			this.evictKeyWithAppendTail(appendToTailIndex, key, value)
+	_, exist := this.valueMap[key]
+	if !exist {
+		node := NewNode(key, value)
+		this.valueMap[key] = node
+		this.doublyLinkedList.Insert(node)
+		this.length += 1
+		if this.length > this.capacity {
+			this.length -= 1
+			delete(this.valueMap, this.doublyLinkedList.head.key)
+			this.doublyLinkedList.RemoveHead()
 		}
 	} else {
-		this.evictKeyWithAppendTail(idx, key, value)
+		this.doublyLinkedList.Remove(this.valueMap[key])
+		this.doublyLinkedList.Insert(this.valueMap[key])
+		this.valueMap[key].value = value
 	}
 }
 
-// func main() {
-// 	cache := Constructor(1)
-// 	log.Println("Put (2, 1)")
-// 	cache.Put(2, 1)
+func main() {
+	cache := Constructor(1)
+	log.Println("Put (2, 1)")
+	cache.Put(2, 1)
 
-// 	log.Println("Geting 2")
-// 	log.Println("Get 2: ", cache.Get(2))
+	log.Println("Geting 2")
+	log.Println("Get 2: ", cache.Get(2))
 
-// 	log.Println("Put (3, 2)")
-// 	cache.Put(3, 2)
+	log.Println("Put (3, 2)")
+	cache.Put(3, 2)
 
-// 	log.Println("Geting 2")
-// 	log.Println("Get 2: ", cache.Get(2))
+	log.Println("Geting 2")
+	log.Println("Get 2: ", cache.Get(2))
 
-// 	log.Println("Geting 3")
-// 	log.Println("Get 3: ", cache.Get(3))
+	log.Println("Geting 3")
+	log.Println("Get 3: ", cache.Get(3))
 
-// 	log.Println("Test passed!")
-// }
+	log.Println("Test passed!")
+}
