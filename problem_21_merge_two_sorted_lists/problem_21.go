@@ -1,6 +1,8 @@
 package main
 
 /*
+   <Level> easy
+
    Description
 
    Merge two sorted linked lists and return it as a new list.
