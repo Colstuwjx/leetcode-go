@@ -148,7 +148,7 @@ func (this *LRUCache) IndexMap() map[int]int {
 	return values
 }
 
-func (this *LRUCache) Iteral() [][]int {
+func (this *LRUCache) Iterate() [][]int {
 	var values [][]int
 	pointer := this.doublyLinkedList.head
 	for {
